@@ -525,6 +525,26 @@
     .progreso-etiqueta{font-size:var(--text-xs);color:var(--color-text-faint);font-weight:600;text-align:center;}
     .progreso-etapa.activa .progreso-etiqueta,.progreso-etapa.completada .progreso-etiqueta{color:var(--color-text);}
 
+
+    /* ===== ETA Y DISTANCIA RECORRIDA ===== */
+    .eta-distancia-row{
+      display:flex;gap:var(--space-4);padding:var(--space-4) var(--space-5);
+      border-top:1px solid var(--color-divider);flex-wrap:wrap;
+    }
+    .eta-item{
+      flex:1;min-width:120px;
+      background:var(--color-surface-2);border-radius:var(--radius-md);
+      padding:var(--space-3) var(--space-4);
+      display:flex;align-items:center;gap:var(--space-3);
+    }
+    .eta-icon{
+      width:32px;height:32px;flex-shrink:0;border-radius:var(--radius-md);
+      background:rgba(34,197,94,0.12);display:flex;align-items:center;justify-content:center;
+    }
+    .eta-icon svg{width:16px;height:16px;color:var(--color-enruta-dot);}
+    .eta-label{font-size:var(--text-xs);color:var(--color-text-faint);text-transform:uppercase;letter-spacing:0.06em;}
+    .eta-value{font-size:var(--text-sm);font-weight:700;color:var(--color-text);}
+
   </style>
 </head>
 <body>
@@ -829,6 +849,20 @@
     const tieneGPS = !completada && p.lat != null && p.lng != null && !isNaN(p.lat) && !isNaN(p.lng);
     const mapaId = 'mapa-' + index;
 
+    const etaDistanciaHTML = (!completada && estado === 'EN RUTA' && (p.eta || (p.distancia_recorrida_km != null && p.distancia_recorrida_km > 0))) ? `
+      <div class="eta-distancia-row">
+        ${p.eta ? `
+        <div class="eta-item">
+          <div class="eta-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+          <div><div class="eta-label">Llegada estimada</div><div class="eta-value">${escapeHtml(p.eta)}</div></div>
+        </div>` : ''}
+        ${(p.distancia_recorrida_km != null && p.distancia_recorrida_km > 0) ? `
+        <div class="eta-item">
+          <div class="eta-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7"/></svg></div>
+          <div><div class="eta-label">Distancia recorrida</div><div class="eta-value">${p.distancia_recorrida_km} km</div></div>
+        </div>` : ''}
+      </div>` : '';
+
 
     const mapaHTML = !completada ? (
       tieneGPS ? `
@@ -890,7 +924,12 @@
 
 
     if (tieneGPS) {
-      mapasActivos[mapaId] = { lat: Number(p.lat), lng: Number(p.lng), matricula: p.matricula, actualizado: p.gps_actualizado };
+      mapasActivos[mapaId] = {
+        lat: Number(p.lat), lng: Number(p.lng),
+        matricula: p.matricula, actualizado: p.gps_actualizado,
+        traza: Array.isArray(p.traza) ? p.traza : [],
+        cliente_lat: p.cliente_lat, cliente_lng: p.cliente_lng
+      };
     }
 
 
@@ -921,6 +960,7 @@
             ${incidenciaHTML}
             ${salidaBaseHTML}
             ${progresoHTML}
+            ${etaDistanciaHTML}
             ${completadaHTML}
             ${mapaHTML}
           </div>
@@ -942,6 +982,15 @@
     requestAnimationFrame(paso);
   }
 
+  function destinoIcon() {
+    return L.divIcon({
+      html: '<div style="background:#c0392b;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);border:2px solid white;"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" width="13" height="13"><path d="M12 21s-7-6.5-7-11a7 7 0 1 1 14 0c0 4.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>',
+      className: '',
+      iconSize: [26, 26],
+      iconAnchor: [13, 26]
+    });
+  }
+
   function inicializarMapas() {
     Object.keys(mapasActivos).forEach(function(mapaId) {
       const el = document.getElementById(mapaId);
@@ -949,12 +998,18 @@
 
       const info = mapasActivos[mapaId];
       const existente = mapasInstancias[mapaId];
+      const puntosTraza = (info.traza || []).map(p => [p[0], p[1]]);
 
       if (existente && existente.marker) {
         const posActual = existente.marker.getLatLng();
         animarMarcador(existente.marker, posActual.lat, posActual.lng, info.lat, info.lng, 900);
         existente.marker.setPopupContent('<strong>' + escapeHtml(info.matricula) + '</strong><br>Actualizado: ' + escapeHtml(info.actualizado || 'N/D'));
         existente.map.panTo([info.lat, info.lng], { animate: true, duration: 0.9 });
+
+        if (puntosTraza.length > 1) {
+          if (existente.polyline) existente.polyline.setLatLngs(puntosTraza);
+          else existente.polyline = L.polyline(puntosTraza, { color: '#0f2a4a', weight: 3, opacity: 0.6, dashArray: '1,6' }).addTo(existente.map);
+        }
         return;
       }
 
@@ -981,7 +1036,25 @@
         .addTo(map)
         .bindPopup('<strong>' + escapeHtml(info.matricula) + '</strong><br>Actualizado: ' + escapeHtml(info.actualizado || 'N/D'));
 
-      mapasInstancias[mapaId] = { map: map, marker: marker };
+      let polyline = null;
+      if (puntosTraza.length > 1) {
+        polyline = L.polyline(puntosTraza, { color: '#0f2a4a', weight: 3, opacity: 0.6, dashArray: '1,6' }).addTo(map);
+      }
+
+      let destinoMarker = null;
+      const boundsPuntos = [[info.lat, info.lng]];
+      if (info.cliente_lat && info.cliente_lng) {
+        destinoMarker = L.marker([info.cliente_lat, info.cliente_lng], { icon: destinoIcon() })
+          .addTo(map)
+          .bindPopup('<strong>Destino</strong>');
+        boundsPuntos.push([info.cliente_lat, info.cliente_lng]);
+      }
+
+      if (boundsPuntos.length > 1) {
+        map.fitBounds(boundsPuntos, { padding: [30, 30], maxZoom: 15 });
+      }
+
+      mapasInstancias[mapaId] = { map: map, marker: marker, polyline: polyline, destinoMarker: destinoMarker };
     });
   }
 
